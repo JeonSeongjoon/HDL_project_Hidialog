@@ -46,6 +46,16 @@ import copy
 
 from data import HiDialogDataset, HiDialogDataloader, HiDialogDataset4f1c
 
+
+######################Change1##########################
+from models.Albert.tokenization_albert import AlbertTokenizer
+from models.Albert.Hidialog_albert import HiDialog_Albert
+from models.Albert.configuration_albert import AlbertConfig
+#######################################################
+
+
+####### module ############
+
 n_classes = {
         "DialogRE": 36,
         "MELD": 7,
@@ -607,11 +617,6 @@ def main():
     args.train_batch_size = int(args.train_batch_size / args.gradient_accumulation_steps)
     
 
-    # random.seed(args.seed)
-    # np.random.seed(args.seed)
-    # torch.manual_seed(args.seed)
-    # if n_gpu > 0:
-    #     torch.cuda.manual_seed_all(args.seed)
     set_seed(42)
 
     if not args.do_train and not args.do_eval:
@@ -621,8 +626,12 @@ def main():
         config = BertConfig.from_json_file(args.config_file)
     elif args.encoder_type == "RoBERTa":
         config = RobertaConfig.from_json_file(args.config_file)
+    ###################### Change2 ###########################
+    elif args.encoder_type == "Albert":
+        config = AlbertConfig.from_json_file(args.config_file)      ### 1) Encoder_type  2) AlbertConfig
+    ##########################################################
     else:
-        raise ValueError("The encoder type is BERT or RoBERTa.")
+        raise ValueError("The encoder type is BERT, RoBERTa, and Albert")
 
     if args.max_seq_length > config.max_position_embeddings:
         raise ValueError(
@@ -639,8 +648,10 @@ def main():
         tokenizer = tokenization.FullTokenizer(vocab_file=args.vocab_file, do_lower_case=args.do_lower_case)
     elif args.encoder_type == "RoBERTa" and args.merges_file:
         tokenizer = RobertaTokenizer(vocab_file=args.vocab_file, merges_file=args.merges_file)
-        special_tokens_dict = {'additional_special_tokens': ["[unused1]", "[unused2]"]} #,"[unused3]"
-        num_added_toks = tokenizer.add_special_tokens(special_tokens_dict) 
+    ######################## Change3 #############################
+    elif args.encoder_type == "Albert":
+        tokenizer = AlbertTokenizer(vocab_file=args.vocab_file, do_lower_case=True)  ## 1) AlbertTokenizer 2)vocab_file
+    ##############################################################
     else:
         raise ValueError("The Roberta model needs a merge file.")
 
@@ -664,6 +675,12 @@ def main():
         if args.init_checkpoint is not None:
             model.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu'), strict=False)
         model.roberta.resize_token_embeddings(len(tokenizer))
+    ########################### Change 3 #################################
+    elif args.encoder_type == "Albert":
+        model = HiDialog_Albert(config, n_class, gtn_num_layers=args.gtn_num_layers, gtn_num_channels=args.gtn_num_channels, dataset=args.data_name, intra_turn_only=args.intra_turn_only)
+        if args.init_checkpoint is not None:
+            model.load_state_dict(torch.load(args.init_checkpoint, map_location='cpu'), strict=False)
+    ######################################################################
 
     if args.fp16:
         model.half()

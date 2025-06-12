@@ -30,6 +30,7 @@ import numpy as np
 import dgl
 import dgl.nn.pytorch as dglnn
 
+
 def get_cuda(tensor):
     if torch.cuda.is_available():
         return tensor.cuda()
