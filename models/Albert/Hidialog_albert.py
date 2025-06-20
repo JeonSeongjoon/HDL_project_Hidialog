@@ -6,6 +6,33 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 
 from .modeling_albert import AlbertPreTrainedModel, AlbertModel
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        return focal_loss.mean()
+
+
+class FocalLosswithBCE(nn.Module):
+    # Multi-label task를 위한 focal loss
+    def __init__(self, alpha=1, gamma=2):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        
+    def forward(self, inputs, targets):
+        # Multi-label classification용
+        bce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+        pt = torch.exp(-bce_loss)
+        focal_loss = self.alpha * (1-pt)**self.gamma * bce_loss
+        return focal_loss.mean()
+
 
 class GTN(nn.Module):
     '''Graph Transformer Networks - adapted from https://github.com/seongjunyun/Graph_Transformer_Networks'''
@@ -284,13 +311,13 @@ class HiDialog_Albert(AlbertPreTrainedModel):
             
         # Final classification
         logits = self.classifier(pooled_output)
-        logits = logits.view(-1, self.num_labels)
+        logits = logits.view(-1, self.num_labels)  # shape : ( #example , #class )
 
         # Compute loss based on dataset type
         if labels is not None:
             if self.dataset not in ['MRDA', 'MuTual']:
                 # Multi-label classification (e.g., DialogRE)
-                loss_fct = BCEWithLogitsLoss()
+                loss_fct = FocalLosswithBCE() #BCEWithLogitsLoss() 
                 labels = labels.view(-1, self.num_labels)
                 loss = loss_fct(logits, labels)
                 return loss, logits

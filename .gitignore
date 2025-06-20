@@ -1,4 +1,4 @@
-DialogRE/model.pt
 DialogRE/model_best.pt
 pre-trained_model/RoBERTa/pytorch_model.bin
 pre-trained_model/RoBERTa/roberta.large/model.pt
+pre-trained_model/Albert_v2/pytorch_model.bin

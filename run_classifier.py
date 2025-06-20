@@ -26,6 +26,7 @@ from tqdm import tqdm, trange
 
 import numpy as np
 import torch
+import torch.nn.utils
 import time
 
 from models.BERT import tokenization
@@ -51,6 +52,7 @@ from data import HiDialogDataset, HiDialogDataloader, HiDialogDataset4f1c
 from models.Albert.tokenization_albert import AlbertTokenizer
 from models.Albert.Hidialog_albert import HiDialog_Albert
 from models.Albert.configuration_albert import AlbertConfig
+from sklearn.metrics import precision_score, recall_score, accuracy_score
 #######################################################
 
 
@@ -583,6 +585,11 @@ def main():
                         default=False,
                         action='store_true',
                         help="whether to use GTN")
+    ######################Grad clipping#############################
+    parser.add_argument("--max_grad_norm",
+                        default=1.0,
+                        type=float,
+                        help="Max gradient norm for clipping. Set to 0 to disable.")
                                                 
 
 
@@ -772,6 +779,21 @@ def main():
                     loss = loss / args.gradient_accumulation_steps
                 
                 loss.backward()
+                #grad_norm = clip_grad_norm_(model.parameters(), max_norm=1.0)
+               
+                ###############################################
+                '''
+                if (step + 1) % 100 == 0:  # 100스텝마다 체크
+                    total_norm = 0
+                    for param in model.parameters():
+                        if param.requires_grad and param.grad is not None:
+                            param_norm = param.grad.data.norm(2)
+                            total_norm += param_norm.item() ** 2
+                    total_norm = total_norm ** 0.5
+                    logger.info(f"Step {step + 1}, Total gradient norm: {total_norm:.6f}")
+                    #print(f"Step {step + 1}: gradient norm = {total_norm}")'''
+                ###############################################################
+
 
                 tr_loss += loss.item()
                 nb_tr_examples += input_ids.size(0)
@@ -788,9 +810,21 @@ def main():
                             args.loss_scale = args.loss_scale / 2
                             model.zero_grad()
                             continue
+                        
+                        # ===== 그래드 클리핑 적용 (FP16/CPU 최적화 경우) =====
+                        #if hasattr(args, 'max_grad_norm') and args.max_grad_norm > 0:
+                        #    # param_optimizer는 CPU상의 파라미터들
+                        #    actual_norm = torch.nn.utils.clip_grad_norm_([p for n, p in param_optimizer], args.max_grad_norm)
+                        #    if (step + 1) % 100 == 0:
+                        #        logger.info(f"Step {step + 1}, Gradient norm AFTER clipping: {actual_norm:.6f}, Max norm: {args.max_grad_norm}")
+
                         optimizer.step()
                         copy_optimizer_params_to_model(model.named_parameters(), param_optimizer)
                     else:
+                        #if hasattr(args, 'max_grad_norm') and args.max_grad_norm > 0:
+                        #    actual_norm = torch.nn.utils.clip_grad_norm_([p for n, p in param_optimizer], args.max_grad_norm)
+                        #    if (step + 1) % 100 == 0:
+                        #        logger.info(f"Step {step + 1}, Gradient norm AFTER clipping: {actual_norm:.6f}, Max norm: {args.max_grad_norm}")
 
                         optimizer.step()
 
@@ -870,8 +904,30 @@ def main():
                 if args.f1eval:
                     eval_f1, eval_T2 = f1_eval(logits_all, labels_all)
                     result["f1"] = eval_f1
-                    result["T2"] = eval_T2                
+                    result["T2"] = eval_T2     
 
+                    #####################Metric##################################
+                    predicted = np.argmax(logits_all, axis=1)
+                    true_labels = np.argmax(labels_all, axis=1)
+
+                    pred_counts = np.bincount(predicted)
+                    logger.info("=== 예측 클래스 분포 ===")
+                    for class_id, count in enumerate(pred_counts):
+                        if count > 0:
+                            logger.info(f"Class {class_id}: {count} samples ({count/len(predicted)*100:.1f}%)")
+                    # 클래스별 precision, recall 계산
+        
+                    precision_macro = precision_score(true_labels, predicted, average='macro', zero_division=0)
+                    recall_macro = recall_score(true_labels, predicted, average='macro', zero_division=0)
+                    precision_weighted = precision_score(true_labels, predicted, average='weighted', zero_division=0)
+                    recall_weighted = recall_score(true_labels, predicted, average='weighted', zero_division=0)
+                    accuracy_scores = accuracy_score(true_labels, predicted)
+
+                    logger.info(f"Precision (macro): {precision_macro:.4f}, Recall (macro): {recall_macro:.4f}")
+                    logger.info(f"Precision (weighted): {precision_weighted:.4f}, Recall (weighted): {recall_weighted:.4f}")      
+                    logger.info(f"Accuracy: {accuracy_scores:.4f}")
+                    #######################################################
+                    
                 logger.info("***** Eval results *****")
                 for key in sorted(result.keys()):
                     logger.info("  %s = %s", key, str(result[key]))
@@ -922,6 +978,7 @@ def main():
                     if eval_f1 >= best_metric:
                         torch.save(model.state_dict(), os.path.join(args.output_dir, "model_best.pt"))
                         best_metric = eval_f1   
+                    
                             
                     torch.save(model.state_dict(), os.path.join(args.output_dir, "model_{}.pt".format(ep)))
                 logger.info("***** Eval results *****")
